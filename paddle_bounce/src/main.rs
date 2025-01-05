@@ -20,17 +20,16 @@ fn setup(
     commands.spawn(Camera2d);
 
     // Set up the game's field.
-    const WALL_Y: f32 = 16.0;
-    let factor: f32 = (window.width() / 2.74).min((window.height() - (2.0 * WALL_Y)) / 1.525);
+    const WALL_THICKNESS: f32 = 16.0;
+    const COURT_WIDTH: f32 = 1236.0;
 
-    let top = (window.height() / 2.0) - (WALL_Y / 2.0);
-    let bottom = -top;
+    let offset = (window.height() / 2.0) - (WALL_THICKNESS / 2.0);
     commands.spawn((
         Mesh2d(meshes.add(Rectangle::default())),
         MeshMaterial2d(materials.add(Color::WHITE)),
         Transform {
-            translation: Vec3::new(0.0, top, 0.0),
-            scale: Vec3::new(2.74 * factor, WALL_Y, 100.0),
+            translation: Vec3::new(0.0, offset, 0.0),
+            scale: Vec3::new(COURT_WIDTH, WALL_THICKNESS, 0.0),
             ..Default::default()
         },
     ));
@@ -38,8 +37,8 @@ fn setup(
         Mesh2d(meshes.add(Rectangle::default())),
         MeshMaterial2d(materials.add(Color::WHITE)),
         Transform {
-            translation: Vec3::new(0.0, -top, 0.0),
-            scale: Vec3::new(2.74 * factor, WALL_Y, 100.0),
+            translation: Vec3::new(0.0, -offset, 0.0),
+            scale: Vec3::new(COURT_WIDTH, WALL_THICKNESS, 0.0),
             ..Default::default()
         },
     ));
