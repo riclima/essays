@@ -66,6 +66,34 @@ fn setup(
         ));
     }
 
+    // Set up the game's paddles.
+    let paddle_width = 16.0;
+    let paddle_height = 64.0;
+    let paddle_offset = (COURT_WIDTH / 2.0) - 16.0;
+    let paddle_scale = Vec3::new(paddle_width, paddle_height, 1.0);
+
+    commands.spawn((
+        Name::new("player1"),
+        Mesh2d(meshes.add(Rectangle::default())),
+        MeshMaterial2d(materials.add(Color::WHITE)),
+        Transform {
+            translation: Vec3::new(-paddle_offset, 0.0, 0.0),
+            scale: paddle_scale,
+            ..default()
+        },
+    ));
+
+    commands.spawn((
+        Name::new("player2"),
+        Mesh2d(meshes.add(Rectangle::default())),
+        MeshMaterial2d(materials.add(Color::WHITE)),
+        Transform {
+            translation: Vec3::new(paddle_offset, 0.0, 0.0),
+            scale: paddle_scale,
+            ..default()
+        },
+    ));
+
     // Now that we are done with resources, we can insert them into the
     // world so other systems can use them.
     commands.insert_resource(background);
