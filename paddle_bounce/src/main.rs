@@ -1,12 +1,20 @@
-use core::num;
-use std::os::unix::raw::off_t;
+use bevy::prelude::*;
 
-use bevy::{color::palettes::css::{BLACK, WHITE}, image::BevyDefault, prelude::*};
+#[derive(Resource)]
+struct Court {
+    dimensions: Vec2,
+}
+
+#[derive(Component)]
+struct Player {
+    id: u8,
+}
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_systems(Startup, setup)
+        .add_systems(FixedUpdate, move_paddle)
         .run();
 }
 
@@ -17,7 +25,7 @@ fn setup(
     window: Single<&Window>,
 ) {
     // Firstly, we create the resources that we will use in our game.
-    let background = ClearColor(Color::BLACK.into());
+    ClearColor(Color::BLACK.into());
 
     // Set up the game's camera.
     commands.spawn(Camera2d);
@@ -69,11 +77,10 @@ fn setup(
     // Set up the game's paddles.
     let paddle_width = 16.0;
     let paddle_height = 64.0;
-    let paddle_offset = (COURT_WIDTH / 2.0) - 16.0;
     let paddle_scale = Vec3::new(paddle_width, paddle_height, 1.0);
+    let paddle_offset = (COURT_WIDTH / 2.0) - (paddle_width / 2.0);
 
     commands.spawn((
-        Name::new("player1"),
         Mesh2d(meshes.add(Rectangle::default())),
         MeshMaterial2d(materials.add(Color::WHITE)),
         Transform {
@@ -81,10 +88,10 @@ fn setup(
             scale: paddle_scale,
             ..default()
         },
+        Player { id: 0 },
     ));
 
     commands.spawn((
-        Name::new("player2"),
         Mesh2d(meshes.add(Rectangle::default())),
         MeshMaterial2d(materials.add(Color::WHITE)),
         Transform {
@@ -92,9 +99,40 @@ fn setup(
             scale: paddle_scale,
             ..default()
         },
+        Player { id: 1 },
     ));
 
     // Now that we are done with resources, we can insert them into the
     // world so other systems can use them.
-    commands.insert_resource(background);
+    commands.insert_resource(Court {
+        dimensions: Vec2::new(COURT_WIDTH, window.height() - (WALL_THICKNESS * 2.0)),
+    });
+}
+
+fn move_paddle(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut query: Query<(&mut Transform, &Player)>,
+    time: Res<Time>,
+    court: Res<Court>,
+) {
+    for (mut transform, player) in &mut query {
+        let mut direction = 0.0;
+        let (up_key, down_key) = match player.id {
+            0 => (KeyCode::KeyW, KeyCode::KeyS),
+            _ => (KeyCode::ArrowUp, KeyCode::ArrowDown),
+        };
+
+        if keyboard_input.pressed(up_key) {
+            direction += 1.0;
+        }
+        if keyboard_input.pressed(down_key) {
+            direction -= 1.0;
+        }
+
+        const PADDLE_SPEED: f32 = 500.0;
+        let new_y = transform.translation.y + direction * PADDLE_SPEED * time.delta_secs();
+        let paddle_half_height = transform.scale.y / 2.0;
+        let half_height = (court.dimensions.y / 2.0) - paddle_half_height;
+        transform.translation.y = new_y.clamp(-half_height, half_height);
+    }
 }
