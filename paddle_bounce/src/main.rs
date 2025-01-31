@@ -10,11 +10,18 @@ struct Player {
     id: u8,
 }
 
+#[derive(Component)]
+struct Ball;
+
+#[derive(Component, Deref, DerefMut)]
+struct Velocity(Vec2);
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
+        .insert_resource(ClearColor(Color::BLACK.into()))
         .add_systems(Startup, setup)
-        .add_systems(FixedUpdate, move_paddle)
+        .add_systems(FixedUpdate, (move_paddle, apply_velocity).chain())
         .run();
 }
 
@@ -24,9 +31,6 @@ fn setup(
     mut materials: ResMut<Assets<ColorMaterial>>,
     window: Single<&Window>,
 ) {
-    // Firstly, we create the resources that we will use in our game.
-    ClearColor(Color::BLACK.into());
-
     // Set up the game's camera.
     commands.spawn(Camera2d);
 
@@ -102,11 +106,31 @@ fn setup(
         Player { id: 1 },
     ));
 
+    // Set up the game's ball.
+    commands.spawn((
+        Ball,
+        Mesh2d(meshes.add(Circle::default())),
+        MeshMaterial2d(materials.add(Color::WHITE)),
+        Transform {
+            translation: Vec3::new(0.0, 0.0, 0.0),
+            scale: Vec3::new(16.0, 16.0, 1.0),
+            ..default()
+        },
+        Velocity(Vec2::new(0.5, -0.5).normalize() * 300.0),
+    ));
+
     // Now that we are done with resources, we can insert them into the
     // world so other systems can use them.
     commands.insert_resource(Court {
         dimensions: Vec2::new(COURT_WIDTH, window.height() - (WALL_THICKNESS * 2.0)),
     });
+}
+
+fn apply_velocity(mut query: Query<(&mut Transform, &Velocity)>, time: Res<Time>) {
+    for (mut transform, velocity) in &mut query {
+        transform.translation.x += velocity.x * time.delta_secs();
+        transform.translation.y += velocity.y * time.delta_secs();
+    }
 }
 
 fn move_paddle(
