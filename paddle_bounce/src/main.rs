@@ -1,4 +1,7 @@
-use bevy::prelude::*;
+use bevy::{
+    math::bounding::{Aabb2d, BoundingCircle, BoundingVolume, IntersectsVolume},
+    prelude::*,
+};
 
 #[derive(Resource)]
 struct Court {
@@ -10,11 +13,34 @@ struct Player {
     id: u8,
 }
 
+#[derive(Component)]
+struct Ball;
+
+#[derive(Component, Deref, DerefMut)]
+struct Velocity(Vec2);
+
+#[derive(Component, Default)]
+struct Collider;
+
+#[derive(Component)]
+#[require(Collider)]
+struct Wall;
+
+#[derive(Event, Default)]
+struct CollisionEvent;
+
+const BALL_RADIUS: f32 = 12.0;
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
+        .insert_resource(ClearColor(Color::BLACK.into()))
+        .add_event::<CollisionEvent>()
         .add_systems(Startup, setup)
-        .add_systems(FixedUpdate, move_paddle)
+        .add_systems(
+            FixedUpdate,
+            (move_paddle, apply_velocity, check_for_collisions).chain(),
+        )
         .run();
 }
 
@@ -24,9 +50,6 @@ fn setup(
     mut materials: ResMut<Assets<ColorMaterial>>,
     window: Single<&Window>,
 ) {
-    // Firstly, we create the resources that we will use in our game.
-    ClearColor(Color::BLACK.into());
-
     // Set up the game's camera.
     commands.spawn(Camera2d);
 
@@ -36,6 +59,7 @@ fn setup(
 
     let offset = (window.height() / 2.0) - (WALL_THICKNESS / 2.0);
     commands.spawn((
+        Wall,
         Mesh2d(meshes.add(Rectangle::default())),
         MeshMaterial2d(materials.add(Color::WHITE)),
         Transform {
@@ -43,8 +67,10 @@ fn setup(
             scale: Vec3::new(COURT_WIDTH, WALL_THICKNESS, 0.0),
             ..Default::default()
         },
+        Collider,
     ));
     commands.spawn((
+        Wall,
         Mesh2d(meshes.add(Rectangle::default())),
         MeshMaterial2d(materials.add(Color::WHITE)),
         Transform {
@@ -52,6 +78,7 @@ fn setup(
             scale: Vec3::new(COURT_WIDTH, WALL_THICKNESS, 0.0),
             ..Default::default()
         },
+        Collider,
     ));
 
     const NUM_UNITS: f32 = 63.0;
@@ -89,6 +116,7 @@ fn setup(
             ..default()
         },
         Player { id: 0 },
+        Collider,
     ));
 
     commands.spawn((
@@ -100,6 +128,16 @@ fn setup(
             ..default()
         },
         Player { id: 1 },
+        Collider,
+    ));
+
+    // Set up the game's ball.
+    commands.spawn((
+        Ball,
+        Mesh2d(meshes.add(Circle::new(BALL_RADIUS))),
+        MeshMaterial2d(materials.add(Color::WHITE)),
+        Transform::default(),
+        Velocity(Vec2::new(0.5, -0.5).normalize() * 300.0),
     ));
 
     // Now that we are done with resources, we can insert them into the
@@ -107,6 +145,13 @@ fn setup(
     commands.insert_resource(Court {
         dimensions: Vec2::new(COURT_WIDTH, window.height() - (WALL_THICKNESS * 2.0)),
     });
+}
+
+fn apply_velocity(mut query: Query<(&mut Transform, &Velocity)>, time: Res<Time>) {
+    for (mut transform, velocity) in &mut query {
+        transform.translation.x += velocity.x * time.delta_secs();
+        transform.translation.y += velocity.y * time.delta_secs();
+    }
 }
 
 fn move_paddle(
@@ -135,4 +180,77 @@ fn move_paddle(
         let half_height = (court.dimensions.y / 2.0) - paddle_half_height;
         transform.translation.y = new_y.clamp(-half_height, half_height);
     }
+}
+
+fn check_for_collisions(
+    // mut commands: Commands,
+    ball_query: Single<(&mut Velocity, &Transform), With<Ball>>,
+    collider_query: Query<&Transform, With<Collider>>,
+    mut collision_events: EventWriter<CollisionEvent>,
+) {
+    let (mut ball_velocity, ball_transform) = ball_query.into_inner();
+
+    for collider_transform in &collider_query {
+        let collision = ball_collision(
+            BoundingCircle::new(ball_transform.translation.truncate(), BALL_RADIUS),
+            Aabb2d::new(
+                collider_transform.translation.truncate(),
+                collider_transform.scale.truncate() / 2.0,
+            ),
+        );
+
+        if let Some(collision) = collision {
+            collision_events.send_default();
+
+            let mut reflect_x = false;
+            let mut reflect_y = false;
+
+            match collision {
+                Collision::Left => reflect_x = ball_velocity.x > 0.0,
+                Collision::Right => reflect_x = ball_velocity.x < 0.0,
+                Collision::Bottom => reflect_y = ball_velocity.y > 0.0,
+                Collision::Top => reflect_y = ball_velocity.y < 0.0,
+            }
+
+            if reflect_x {
+                ball_velocity.x *= -1.0;
+            }
+
+            if reflect_y {
+                ball_velocity.y *= -1.0;
+            }
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+enum Collision {
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+fn ball_collision(ball: BoundingCircle, bounding_box: Aabb2d) -> Option<Collision> {
+    if !ball.intersects(&bounding_box) {
+        return None;
+    }
+
+    let closest = bounding_box.closest_point(ball.center());
+    let offset = ball.center() - closest;
+    let side = if offset.x.abs() > offset.y.abs() {
+        if offset.x > 0.0 {
+            Collision::Right
+        } else {
+            Collision::Left
+        }
+    } else {
+        if offset.y > 0.0 {
+            Collision::Top
+        } else {
+            Collision::Bottom
+        }
+    };
+
+    Some(side)
 }
