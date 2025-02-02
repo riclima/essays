@@ -1,46 +1,30 @@
-use bevy::{
-    math::bounding::{Aabb2d, BoundingCircle, BoundingVolume, IntersectsVolume},
-    prelude::*,
-};
-
-#[derive(Resource)]
-struct Court {
-    dimensions: Vec2,
-}
+use bevy::prelude::*;
+use bevy_rapier2d::prelude::*;
 
 #[derive(Component)]
 struct Player {
     id: u8,
 }
 
+#[derive(Resource, Deref)]
+struct CollisionSound(Handle<AudioSource>);
+
 #[derive(Component)]
 struct Ball;
 
-#[derive(Component, Deref, DerefMut)]
-struct Velocity(Vec2);
-
-#[derive(Component, Default)]
-struct Collider;
-
 #[derive(Component)]
-#[require(Collider)]
 struct Wall;
-
-#[derive(Event, Default)]
-struct CollisionEvent;
 
 const BALL_RADIUS: f32 = 12.0;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
+        .add_plugins(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(100.0))
+        // .add_plugins(RapierDebugRenderPlugin::default())
         .insert_resource(ClearColor(Color::BLACK.into()))
-        .add_event::<CollisionEvent>()
         .add_systems(Startup, setup)
-        .add_systems(
-            FixedUpdate,
-            (move_paddle, apply_velocity, check_for_collisions).chain(),
-        )
+        .add_systems(FixedUpdate, (move_paddle, play_collision_sound).chain())
         .run();
 }
 
@@ -48,37 +32,40 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
+    asset_server: Res<AssetServer>,
     window: Single<&Window>,
 ) {
     // Set up the game's camera.
     commands.spawn(Camera2d);
 
+    let ball_collision_sound = asset_server.load("sounds/breakout_collision.ogg");
+    commands.insert_resource(CollisionSound(ball_collision_sound));
+
     // Set up the game's field.
-    const WALL_THICKNESS: f32 = 16.0;
     const COURT_WIDTH: f32 = 1236.0;
+    const WALL_THICKNESS: f32 = 16.0;
 
     let offset = (window.height() / 2.0) - (WALL_THICKNESS / 2.0);
+    Rectangle::default();
     commands.spawn((
         Wall,
-        Mesh2d(meshes.add(Rectangle::default())),
+        Mesh2d(meshes.add(Rectangle::new(COURT_WIDTH, WALL_THICKNESS))),
         MeshMaterial2d(materials.add(Color::WHITE)),
         Transform {
             translation: Vec3::new(0.0, offset, 0.0),
-            scale: Vec3::new(COURT_WIDTH, WALL_THICKNESS, 0.0),
             ..Default::default()
         },
-        Collider,
+        Collider::cuboid(COURT_WIDTH / 2.0, WALL_THICKNESS / 2.0),
     ));
     commands.spawn((
         Wall,
-        Mesh2d(meshes.add(Rectangle::default())),
+        Mesh2d(meshes.add(Rectangle::new(COURT_WIDTH, WALL_THICKNESS))),
         MeshMaterial2d(materials.add(Color::WHITE)),
         Transform {
             translation: Vec3::new(0.0, -offset, 0.0),
-            scale: Vec3::new(COURT_WIDTH, WALL_THICKNESS, 0.0),
             ..Default::default()
         },
-        Collider,
+        Collider::cuboid(COURT_WIDTH / 2.0, WALL_THICKNESS / 2.0),
     ));
 
     const NUM_UNITS: f32 = 63.0;
@@ -104,31 +91,42 @@ fn setup(
     // Set up the game's paddles.
     let paddle_width = 16.0;
     let paddle_height = 64.0;
-    let paddle_scale = Vec3::new(paddle_width, paddle_height, 1.0);
     let paddle_offset = (COURT_WIDTH / 2.0) - (paddle_width / 2.0);
 
     commands.spawn((
-        Mesh2d(meshes.add(Rectangle::default())),
+        Mesh2d(meshes.add(Rectangle::new(paddle_width, paddle_height))),
         MeshMaterial2d(materials.add(Color::WHITE)),
         Transform {
             translation: Vec3::new(-paddle_offset, 0.0, 0.0),
-            scale: paddle_scale,
             ..default()
         },
         Player { id: 0 },
-        Collider,
+        Velocity::linear(Vec2::splat(0.0)),
+        RigidBody::Dynamic,
+        GravityScale(0.0),
+        Collider::cuboid(paddle_width / 2.0, paddle_height / 2.0),
+        LockedAxes::ROTATION_LOCKED_X
+            | LockedAxes::ROTATION_LOCKED_Y
+            | LockedAxes::ROTATION_LOCKED_Z
+            | LockedAxes::TRANSLATION_LOCKED_X,
     ));
 
     commands.spawn((
-        Mesh2d(meshes.add(Rectangle::default())),
+        Mesh2d(meshes.add(Rectangle::new(paddle_width, paddle_height))),
         MeshMaterial2d(materials.add(Color::WHITE)),
         Transform {
             translation: Vec3::new(paddle_offset, 0.0, 0.0),
-            scale: paddle_scale,
             ..default()
         },
         Player { id: 1 },
-        Collider,
+        Velocity::linear(Vec2::splat(0.0)),
+        RigidBody::Dynamic,
+        GravityScale(0.0),
+        Collider::cuboid(paddle_width / 2.0, paddle_height / 2.0),
+        LockedAxes::ROTATION_LOCKED_X
+            | LockedAxes::ROTATION_LOCKED_Y
+            | LockedAxes::ROTATION_LOCKED_Z
+            | LockedAxes::TRANSLATION_LOCKED_X,
     ));
 
     // Set up the game's ball.
@@ -137,30 +135,21 @@ fn setup(
         Mesh2d(meshes.add(Circle::new(BALL_RADIUS))),
         MeshMaterial2d(materials.add(Color::WHITE)),
         Transform::default(),
-        Velocity(Vec2::new(0.5, -0.5).normalize() * 300.0),
+        RigidBody::Dynamic,
+        Collider::ball(BALL_RADIUS),
+        Velocity::linear(Vec2::splat(200.0)),
+        Restitution::coefficient(2.0),
+        GravityScale(0.0),
+        Friction::new(0.0),
+        ActiveEvents::COLLISION_EVENTS,
     ));
-
-    // Now that we are done with resources, we can insert them into the
-    // world so other systems can use them.
-    commands.insert_resource(Court {
-        dimensions: Vec2::new(COURT_WIDTH, window.height() - (WALL_THICKNESS * 2.0)),
-    });
-}
-
-fn apply_velocity(mut query: Query<(&mut Transform, &Velocity)>, time: Res<Time>) {
-    for (mut transform, velocity) in &mut query {
-        transform.translation.x += velocity.x * time.delta_secs();
-        transform.translation.y += velocity.y * time.delta_secs();
-    }
 }
 
 fn move_paddle(
     keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut query: Query<(&mut Transform, &Player)>,
-    time: Res<Time>,
-    court: Res<Court>,
+    mut query: Query<(&mut Velocity, &Player)>,
 ) {
-    for (mut transform, player) in &mut query {
+    for (mut velocity, player) in &mut query {
         let mut direction = 0.0;
         let (up_key, down_key) = match player.id {
             0 => (KeyCode::KeyW, KeyCode::KeyS),
@@ -175,82 +164,17 @@ fn move_paddle(
         }
 
         const PADDLE_SPEED: f32 = 500.0;
-        let new_y = transform.translation.y + direction * PADDLE_SPEED * time.delta_secs();
-        let paddle_half_height = transform.scale.y / 2.0;
-        let half_height = (court.dimensions.y / 2.0) - paddle_half_height;
-        transform.translation.y = new_y.clamp(-half_height, half_height);
+        velocity.linvel.y = direction * PADDLE_SPEED;
     }
 }
 
-fn check_for_collisions(
-    // mut commands: Commands,
-    ball_query: Single<(&mut Velocity, &Transform), With<Ball>>,
-    collider_query: Query<&Transform, With<Collider>>,
-    mut collision_events: EventWriter<CollisionEvent>,
+fn play_collision_sound(
+    mut commands: Commands,
+    mut collision_events: EventReader<CollisionEvent>,
+    sound: Res<CollisionSound>,
 ) {
-    let (mut ball_velocity, ball_transform) = ball_query.into_inner();
-
-    for collider_transform in &collider_query {
-        let collision = ball_collision(
-            BoundingCircle::new(ball_transform.translation.truncate(), BALL_RADIUS),
-            Aabb2d::new(
-                collider_transform.translation.truncate(),
-                collider_transform.scale.truncate() / 2.0,
-            ),
-        );
-
-        if let Some(collision) = collision {
-            collision_events.send_default();
-
-            let mut reflect_x = false;
-            let mut reflect_y = false;
-
-            match collision {
-                Collision::Left => reflect_x = ball_velocity.x > 0.0,
-                Collision::Right => reflect_x = ball_velocity.x < 0.0,
-                Collision::Bottom => reflect_y = ball_velocity.y > 0.0,
-                Collision::Top => reflect_y = ball_velocity.y < 0.0,
-            }
-
-            if reflect_x {
-                ball_velocity.x *= -1.0;
-            }
-
-            if reflect_y {
-                ball_velocity.y *= -1.0;
-            }
-        }
+    if !collision_events.is_empty() {
+        collision_events.clear();
+        commands.spawn((AudioPlayer(sound.clone()), PlaybackSettings::DESPAWN));
     }
-}
-
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
-enum Collision {
-    Left,
-    Right,
-    Top,
-    Bottom,
-}
-
-fn ball_collision(ball: BoundingCircle, bounding_box: Aabb2d) -> Option<Collision> {
-    if !ball.intersects(&bounding_box) {
-        return None;
-    }
-
-    let closest = bounding_box.closest_point(ball.center());
-    let offset = ball.center() - closest;
-    let side = if offset.x.abs() > offset.y.abs() {
-        if offset.x > 0.0 {
-            Collision::Right
-        } else {
-            Collision::Left
-        }
-    } else {
-        if offset.y > 0.0 {
-            Collision::Top
-        } else {
-            Collision::Bottom
-        }
-    };
-
-    Some(side)
 }

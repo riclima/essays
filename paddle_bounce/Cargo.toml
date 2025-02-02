@@ -5,7 +5,11 @@ edition = "2021"
 
 [dependencies]
 bevy = "0.15.0"
-log = { version = "*", features = ["max_level_debug", "release_max_level_warn"] }
+bevy_rapier2d = "0.28.0"
+log = { version = "*", features = [
+    "max_level_debug",
+    "release_max_level_warn",
+] }
 
 [profile.dev]
 opt-level = 1
